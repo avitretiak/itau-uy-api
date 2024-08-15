@@ -1,0 +1,68 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "itau_uy_api"
+version = "0.0.1"
+description = "A Python library for interacting with the Itau UY bank API"
+readme = "README.md"
+requires-python = ">=3.12"
+license = "MIT"
+keywords = []
+authors = [
+  { name = "Avi Tretiak" },
+]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+    "Topic :: Office/Business :: Financial",
+]
+dependencies = [
+    "requests>=2.32.3",
+    "beautifulsoup4>=4.12.3",
+    "python-dotenv>=1.0.1",
+    "ua-generator>=1.0.3",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.3.2",
+    "black",
+    "pyproject-flake8",
+    "mypy",
+    "types-requests"
+]
+
+[project.urls]
+Homepage = "https://github.com/avitretiak/itau-uy-api"
+"Bug Tracker" = "https://github.com/avitretiak/itau-uy-api/issues"
+Repository = "https://github.com/avitretiak/itau-uy-api"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src"]
+
+[tool.black]
+line-length = 120
+target-version = ['py312']
+
+[tool.flake8]
+max-line-length = 120
+extend-ignore = ["E203"]
+exclude=[".venv"]
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+norecursedirs = "projects"
+pythonpath = "."
+addopts = "--import-mode=importlib"
+python_files = "test_*.py"
+testpaths = "tests"

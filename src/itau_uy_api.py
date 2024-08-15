@@ -112,9 +112,7 @@ class ItauAPI:
                     "type": movement_types.get(movement["tipo"], "unknown"),
                     "description": movement["descripcion"],
                     "extraDescription": movement["descripcionAdicional"],
-                    "amount": (
-                        -movement["importe"] if movement["tipo"] == "D" else movement["importe"]
-                    ),
+                    "amount": (-movement["importe"] if movement["tipo"] == "D" else movement["importe"]),
                     "endBalance": movement["saldo"],
                     "date": datetime.fromtimestamp(movement["fecha"]["millis"] / 1000),
                 }
@@ -167,9 +165,7 @@ class ItauAPI:
 
         logger.info("Parsing trx")
         soup = BeautifulSoup(response.text, "html.parser")
-        script_tag = soup.find(
-            "script", string=lambda t: t and "var mensajeUsuario = JSON.parse" in t
-        )
+        script_tag = soup.find("script", string=lambda t: t and "var mensajeUsuario = JSON.parse" in t)
 
         if not script_tag:
             raise ValueError("Could not find user data in the response")
@@ -209,9 +205,7 @@ class ItauAPI:
         Generates headers using ua-generator
         :return: Dictionary of headers
         """
-        ua = ua_generator.generate(
-            device="desktop", browser=("chrome", "edge", "safari"), options=self._ua_options
-        )
+        ua = ua_generator.generate(device="desktop", browser=("chrome", "edge", "safari"), options=self._ua_options)
         headers: Dict[str, str] = ua.headers.get()
         headers.update(
             {
@@ -271,10 +265,7 @@ class ItauAPI:
         """
         logger.info("Requesting credit card transactions")
 
-        url = (
-            f"{self._base_url}/tarjetas/credito/{self.credit_card_hash}/"
-            "movimientos_actuales/00000000"
-        )
+        url = f"{self._base_url}/tarjetas/credito/{self.credit_card_hash}/" "movimientos_actuales/00000000"
         response = self._session.get(url, headers=self._headers)
         response.raise_for_status()
 

@@ -81,8 +81,6 @@ def test_login_manual() -> None:
         print("Login successful!")
         print(f"Number of accounts: {len(api.accounts)}")
         for account in api.accounts:
-            print(
-                f"Account type: {account['type']}, Balance: {account['balance']} {account['currency']}"
-            )
+            print(f"Account type: {account['type']}, Balance: {account['balance']} {account['currency']}")
     except Exception as e:
         pytest.fail(f"Login failed: {str(e)}")

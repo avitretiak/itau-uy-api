@@ -87,9 +87,7 @@ jobs:
 
       - name: Publish to PyPI
         if: steps.check_version.outputs.version_changed == 'true'
-        uses: pypa/gh-action-pypi-publish@release/v1
-        with:
-          repository-url: https://upload.pypi.org/legacy/
+        run: uvx twine upload dist/*
 
       - name: Minimize uv cache
         run: uv cache prune --ci

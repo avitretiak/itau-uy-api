@@ -13,7 +13,7 @@ pip install .
 For development, sync your venv with uv:
 
 ```
-uv sync
+uv sync --all-extras --dev
 ```
 
 ## Usage
@@ -57,9 +57,9 @@ To set up the development environment:
 3. Create a `.env` file in the root directory with the following content:
    ```
    ITAU_USER_ID=your_user_id
-   ITAU_PASSWORD=your_password
+   ITAU_PASSWORD=your_password_base64_encoded
    ```
-   Replace `your_user_id` and `your_password` with your actual Itau credentials.
+   Replace `your_user_id` and `your_password` with your actual Itau credentials, password should be encoded in base64.
 
 4. Run tests:
    ```

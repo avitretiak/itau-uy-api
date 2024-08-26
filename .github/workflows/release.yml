@@ -25,10 +25,9 @@ jobs:
           python-version-file: "pyproject.toml"
 
       - name: Install uv
-        run: curl -LsSf https://astral.sh/uv/install.sh | sh
-
-      - name: Add uv to PATH
-        run: echo "$HOME/.cargo/bin" >> $GITHUB_PATH
+        run: |
+          curl -LsSf https://astral.sh/uv/install.sh | sh
+          echo "$HOME/.cargo/bin" >> $GITHUB_PATH
 
       - name: Restore uv cache
         uses: actions/cache@v4
@@ -68,13 +67,18 @@ jobs:
           prerelease: false
           token: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Install build dependencies
+      - name: Create venv and install build dependencies
         if: steps.check_version.outputs.version_changed == 'true'
-        run: uv pip install build
+        run: |
+          python -m venv .venv
+          . .venv/bin/activate
+          uv pip install build
 
       - name: Build package
         if: steps.check_version.outputs.version_changed == 'true'
-        run: uv run build
+        run: |
+          . .venv/bin/activate
+          python -m build
 
       - name: Publish to PyPI
         if: steps.check_version.outputs.version_changed == 'true'

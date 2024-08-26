@@ -4,13 +4,13 @@ A Python library for interacting with the Itaú Uruguay bank API.
 
 ## Installation
 
-To install the package with all its dependencies:
+To install the package with all its dependencies to your local environment:
 
 ```
-uv pip install .
+pip install .
 ```
 
-For development, sync your venv:
+For development, sync your venv with uv:
 
 ```
 uv sync
@@ -51,7 +51,7 @@ credit_transactions = api.get_credit_card_transactions()
 
 To set up the development environment:
 
-0. Ensure you have ([uv](https://github.com/astral-sh/uv)) installed and are running `Python >= 3.12`
+0. Ensure you have [uv](https://github.com/astral-sh/uv) installed and are running `Python >= 3.12`
 1. Clone the repository and `cd` into it
 2. Sync the virtual environment, installing dependencies with `uv sync`
 3. Create a `.env` file in the root directory with the following content:

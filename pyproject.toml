@@ -10,9 +10,7 @@ readme = "README.md"
 requires-python = ">=3.12"
 license = "MIT"
 keywords = []
-authors = [
-  { name = "Avi Tretiak" },
-]
+authors = [{ name = "Avi Tretiak" }]
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Intended Audience :: Developers",
@@ -22,6 +20,7 @@ classifiers = [
     "Topic :: Software Development :: Libraries :: Python Modules",
     "Topic :: Office/Business :: Financial",
 ]
+
 dependencies = [
     "requests>=2.32.3",
     "beautifulsoup4>=4.12.3",
@@ -29,13 +28,13 @@ dependencies = [
     "ua-generator>=1.0.3",
 ]
 
-[project.optional-dependencies]
-dev = [
+[tool.uv]
+dev-dependencies = [
     "pytest>=8.3.2",
     "black",
     "pyproject-flake8",
     "mypy",
-    "types-requests"
+    "types-requests",
 ]
 
 [project.urls]
@@ -53,7 +52,7 @@ target-version = ['py312']
 [tool.flake8]
 max-line-length = 120
 extend-ignore = ["E203"]
-exclude=[".venv"]
+exclude = [".venv"]
 
 [tool.mypy]
 python_version = "3.12"

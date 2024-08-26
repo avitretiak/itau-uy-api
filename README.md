@@ -7,19 +7,13 @@ A Python library for interacting with the Itaú Uruguay bank API.
 To install the package with all its dependencies:
 
 ```
-pip install .
+uv pip install .
 ```
 
-For development, install with all optional dependencies:
+For development, sync your venv:
 
 ```
-pip install ".[dev]"
-```
-
-If you want to install the package in editable mode for development:
-
-```
-pip install -e ".[dev]"
+uv sync
 ```
 
 ## Usage
@@ -57,29 +51,26 @@ credit_transactions = api.get_credit_card_transactions()
 
 To set up the development environment:
 
-1. Clone the repository
-2. Create a virtual environment: `python -m venv .venv`
-3. Activate the virtual environment:
-   - On Windows: `.venv\Scripts\activate`
-   - On macOS and Linux: `source .venv/bin/activate`
-4. Install dependencies: `pip install ".[dev]"`
-5. Create a `.env` file in the root directory with the following content:
+0. Ensure you have ([uv](https://github.com/astral-sh/uv)) installed and are running `Python >= 3.12`
+1. Clone the repository and `cd` into it
+2. Sync the virtual environment, installing dependencies with `uv sync`
+3. Create a `.env` file in the root directory with the following content:
    ```
    ITAU_USER_ID=your_user_id
    ITAU_PASSWORD=your_password
    ```
    Replace `your_user_id` and `your_password` with your actual Itau credentials.
 
-6. Run tests:
+4. Run tests:
    ```
-   pytest tests/
+   uv run pytest
    ```
 
-7. Run linters and formatters:
+5. Run linters and formatters:
    ```
-   black .
-   pflake8
-   mypy .
+   uv run black .
+   uv run pflake8
+   uv run mypy .
    ```
 
 Note: Make sure to never commit your `.env` file to version control as it contains sensitive information.

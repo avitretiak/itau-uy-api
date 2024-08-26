@@ -1,4 +1,4 @@
-name: Create Release
+name: Create Release and Publish to PyPI
 
 on:
   push:
@@ -6,8 +6,13 @@ on:
       - main
 
 jobs:
-  create-release:
+  create-release-and-publish:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      id-token: write
+    env:
+      UV_CACHE_DIR: /tmp/.uv-cache
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -18,6 +23,21 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version-file: "pyproject.toml"
+
+      - name: Install uv
+        run: curl -LsSf https://astral.sh/uv/install.sh | sh
+
+      - name: Add uv to PATH
+        run: echo "$HOME/.cargo/bin" >> $GITHUB_PATH
+
+      - name: Restore uv cache
+        uses: actions/cache@v4
+        with:
+          path: /tmp/.uv-cache
+          key: uv-${{ runner.os }}-${{ hashFiles('uv.lock') }}
+          restore-keys: |
+            uv-${{ runner.os }}-${{ hashFiles('uv.lock') }}
+            uv-${{ runner.os }}
 
       - name: Check version change
         id: check_version
@@ -48,3 +68,20 @@ jobs:
             For full changes, see the [changelog](CHANGELOG.md).
           draft: false
           prerelease: false
+
+      - name: Install build dependencies
+        if: steps.check_version.outputs.version_changed == 'true'
+        run: uv pip install build
+
+      - name: Build package
+        if: steps.check_version.outputs.version_changed == 'true'
+        run: uv run build
+
+      - name: Publish to PyPI
+        if: steps.check_version.outputs.version_changed == 'true'
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          repository-url: https://upload.pypi.org/legacy/
+
+      - name: Minimize uv cache
+        run: uv cache prune --ci

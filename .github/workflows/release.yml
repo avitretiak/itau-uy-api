@@ -5,6 +5,13 @@ on:
     branches: ["main"]
   pull_request:
     branches: ["main"]
+  workflow_dispatch:
+    inputs:
+      force_release:
+        description: 'Force release'
+        required: false
+        type: boolean
+        default: false
 
 jobs:
   build:
@@ -51,18 +58,18 @@ jobs:
         run: |
           CURRENT_VERSION=$(grep '^version = ' pyproject.toml | sed 's/version = "\(.*\)"/\1/')
           LATEST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "v0.0.0")
-          if [ "v$CURRENT_VERSION" != "$LATEST_TAG" ]; then
-            echo "Version changed from $LATEST_TAG to v$CURRENT_VERSION"
+          if [ "v$CURRENT_VERSION" != "$LATEST_TAG" ] || ${{ github.event.inputs.force_release == 'true' }}; then
+            echo "Version changed from $LATEST_TAG to v$CURRENT_VERSION or force release requested"
             echo "version_changed=true" >> $GITHUB_OUTPUT
             echo "new_version=$CURRENT_VERSION" >> $GITHUB_OUTPUT
           else
-            echo "Version unchanged"
+            echo "Version unchanged and no force release requested"
             echo "version_changed=false" >> $GITHUB_OUTPUT
           fi
 
       - name: Build package
         if: steps.check_version.outputs.version_changed == 'true'
-        run: uv run build
+        run: uvx --from build pyproject-build --installer uv
 
       - name: Create Release
         if: steps.check_version.outputs.version_changed == 'true'

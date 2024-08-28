@@ -3,6 +3,7 @@ This module provides an API client for interacting with the Itau Uruguay bank sy
 It includes functionality for logging in, retrieving account information, and fetching transactions.
 """
 
+import base64
 import json
 import re
 from datetime import datetime
@@ -11,10 +12,10 @@ from urllib.parse import urlparse, parse_qs
 
 import requests
 from bs4 import BeautifulSoup
-from ua_generator.options import Options
 
-from .models import Account, Transaction, CreditCardTransaction
-from .utils import b64decode, generate_headers, logger, BASE_URL, ERROR_CODES
+from .models import Account, CCTransactionType, Transaction, CreditCardTransaction, TransactionType
+from .utils import generate_headers, logger, BASE_URL, ERROR_CODES
+
 
 class ItauAPI:
     """
@@ -33,19 +34,18 @@ class ItauAPI:
 
         logger.info("Created new api for %s", user_id)
         self._id = user_id
-        self._pass = b64decode(password)
+        self._pass = base64.b64decode(password).decode("ascii")
         self.accounts: List[Account] = []
         self.credit_card_hash: str = ""
 
         # Default request values
         self._session = requests.Session()
-        self._ua_options = Options(weighted_versions=True)
         self._headers = generate_headers()
 
     def login(self) -> None:
         """
         Logins with the provided credentials
-        :raises Exception: If login fails
+        :raises ValueError: If login fails
         """
         logger.info("Logging in")
         response = self._do_login()
@@ -71,13 +71,6 @@ class ItauAPI:
         logger.error("Login failed! %s:%s", code, code_message)
         raise ValueError(f"Login failed: {code_message}")
 
-    def get_accounts(self) -> List[Account]:
-        """
-        Returns the list of accounts
-        :return: List of Account objects
-        """
-        return self.accounts
-
     def get_transactions(self, account: Account, start_date: str, end_date: str) -> List[Transaction]:
         """
         Returns transactions for a given account and date range
@@ -92,17 +85,14 @@ class ItauAPI:
 
         current_date = start
         while current_date <= end:
-            month_transactions = self.get_month(account.id, current_date.month, current_date.year)
-            transactions.extend([
-                Transaction(
-                    date=datetime.fromtimestamp(tx["fecha"]["millis"] / 1000).date(),
-                    description=tx["descripcion"],
-                    amount=tx["importe"],
-                    balance=tx.get("saldo")
-                )
-                for tx in month_transactions
-                if start_date <= datetime.fromtimestamp(tx["fecha"]["millis"] / 1000).strftime("%Y-%m-%d") <= end_date
-            ])
+            month_transactions = self.get_month(account.hash, current_date.month, current_date.year)
+
+            # Log the month transactions to debug the KeyError
+            logger.debug("Month transactions for %s/%s: %s", current_date.month, current_date.year, month_transactions)
+
+            transactions.extend(
+                [tx for tx in month_transactions if start_date <= tx.date.strftime("%Y-%m-%d") <= end_date]
+            )
             current_date = datetime(current_date.year + (current_date.month // 12), ((current_date.month % 12) + 1), 1)
 
         return transactions
@@ -126,37 +116,81 @@ class ItauAPI:
             CreditCardTransaction(
                 date=datetime.fromtimestamp(tx["fecha"]["millis"] / 1000).date(),
                 description=tx["nombreComercio"],
+                type=CCTransactionType(tx["tipo"]),
                 amount=tx["importe"],
                 currency="Pesos" if tx["moneda"] == "Pesos" else "Dolares",
                 current_installment=tx["nroCuota"],
-                total_installments=tx["cantCuotas"]
+                total_installments=tx["cantCuotas"],
             )
             for tx in transactions
         ]
 
-    def get_month(self, account_hash: str, month: int, year: int) -> List[Dict[str, Any]]:
+    def get_month(self, account_hash: str, month: int, year: int) -> List[Transaction]:
         """
-        Returns transactions for a specific month and year
+        Returns the transactions for the given month
         :param account_hash: Account hash
         :param month: Month (1-12)
         :param year: Year (four-digit format)
-        :return: List of transaction dictionaries
+        :return: List of transaction objects
+        :raises ValueError: If an invalid month or year is provided, or if a future month is requested
+        :raises requests.exceptions.RequestException: If there's a network error
         """
-        return self._download_month(account_hash, month, year % 100)
+        if not 1 <= month <= 12:
+            raise ValueError("Month must be between 1 and 12")
+        if year < 2000:
+            raise ValueError("Year must be in four-digit format (e.g., 2023)")
+        logger.info("Requesting movements for %s/%s", month, year)
+        year = int(year)
+        month = int(month)
+
+        if year > 2000:
+            year -= 2000
+
+        try:
+            movements = self._download_month(account_hash, month, year)
+            return [
+                Transaction(
+                    date=datetime.fromtimestamp(movement["fecha"]["millis"] / 1000),
+                    type=TransactionType(movement["tipo"]),
+                    description=movement["descripcion"],
+                    extraDescription=movement["descripcionAdicional"],
+                    amount=(-movement["importe"] if movement["tipo"] == TransactionType.DEBIT else movement["importe"]),
+                    balance=movement["saldo"],
+                )
+                for movement in movements
+            ]
+        except requests.exceptions.RequestException as e:
+            if "expiredSession" in str(e):
+                self.login()
+                return self.get_month(account_hash, month, year)
+            raise
 
     def _do_login(self) -> requests.Response:
         """
-        Performs the login request
+        Sends your login credentials.
         :return: Response object
         :raises requests.exceptions.RequestException: If there's a network error
         """
-        url = f"{BASE_URL}/login"
-        data = {
-            "username": self._id,
-            "password": self._pass,
-            "submit": "Ingresar",
-        }
-        response = self._session.post(url, data=data, headers=self._headers, allow_redirects=False)
+        logger.info("Sending credentials to /doLogin")
+        headers = self._headers.copy()
+        headers.update(
+            {
+                "Content-Type": "application/x-www-form-urlencoded",
+                "Origin": "https://www.itau.com.uy",
+                "Referer": "https://www.itau.com.uy/",
+            }
+        )
+        response = self._session.post(
+            f"{BASE_URL}/doLogin",
+            headers=headers,
+            data={
+                "tipo_documento": 1,
+                "tipo_usuario": "R",
+                "nro_documento": self._id,
+                "pass": self._pass,
+            },
+            allow_redirects=False,
+        )
         response.raise_for_status()
         return response
 
@@ -193,12 +227,15 @@ class ItauAPI:
             "cuenta_de_ahorro_junior",
         ]:
             for account in user_data["cuentas"].get(account_type, []):
-                self.accounts.append(Account(
-                    id=account["idCuenta"],
-                    name=f"{account['tipoCuenta']} - {account['nombreTitular']}",
-                    balance=float(account["saldo"]),
-                    currency=account["moneda"]
-                ))
+                self.accounts.append(
+                    Account(
+                        id=account["idCuenta"],
+                        hash=account["hash"],
+                        name=f"{account['tipoCuenta']} - {account['nombreTitular']}",
+                        balance=float(account["saldo"]),
+                        currency=account["moneda"],
+                    )
+                )
         logger.info("Parsed")
 
     def _get_credit_card_hash(self) -> str:
@@ -224,7 +261,7 @@ class ItauAPI:
                     value = option.get("value")
                     if value:
                         hash_part = value.split(":")[0]
-                        return hash_part
+                        return str(hash_part)
 
             raise ValueError("Failed to parse credit card hash from response")
         except requests.exceptions.RequestException as e:
@@ -253,7 +290,7 @@ class ItauAPI:
             response = self._session.post(url, headers=self._headers)
             response.raise_for_status()
             data = response.json()["itaulink_msg"]["data"]
-            return data["movimientosMesActual"]["movimientos"]
+            return list[Dict[str, Any]](data["movimientosMesActual"]["movimientos"])
         elif month > current_month and year == current_year:
             raise ValueError("Future month")
         else:
@@ -261,4 +298,4 @@ class ItauAPI:
             response = self._session.post(url, headers=self._headers)
             response.raise_for_status()
             data = response.json()["itaulink_msg"]["data"]
-            return data["mapaHistoricos"]["movimientosHistoricos"]["movimientos"]
+            return list[Dict[str, Any]](data["mapaHistoricos"]["movimientosHistoricos"]["movimientos"])

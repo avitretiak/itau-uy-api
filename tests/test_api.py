@@ -18,6 +18,7 @@ logging.basicConfig(
     format="%(asctime)s - %(levelname)s - %(message)s",
 )
 
+
 @pytest.fixture(scope="session")
 def api() -> ItauAPI:
     user_id = os.environ.get("ITAU_USER_ID")
@@ -29,8 +30,10 @@ def api() -> ItauAPI:
     api.login()  # Perform login once
     return api
 
+
 def test_login(api: ItauAPI) -> None:
     assert len(api.accounts) > 0, "Login failed: No accounts found"
+
 
 def test_get_accounts(api: ItauAPI) -> None:
     accounts = api.accounts
@@ -41,6 +44,7 @@ def test_get_accounts(api: ItauAPI) -> None:
         assert account.name, "Account name is missing"
         assert account.balance is not None, "Account balance is missing"
         assert account.currency, "Account currency is missing"
+
 
 @pytest.mark.parametrize(
     "start_date, end_date",
@@ -60,6 +64,7 @@ def test_get_transactions(api: ItauAPI, start_date: str, end_date: str) -> None:
         assert tx.amount is not None, "Transaction amount is missing"
         assert tx.description, "Transaction description is missing"
 
+
 def test_get_credit_card_transactions(api: ItauAPI) -> None:
     credit_transactions = api.get_credit_card_transactions()
     assert len(credit_transactions) > 0, "No credit card transactions found"
@@ -71,6 +76,7 @@ def test_get_credit_card_transactions(api: ItauAPI) -> None:
         assert tx.description, "Credit card transaction description is missing"
         assert tx.amount is not None, "Credit card transaction amount is missing"
         assert tx.currency, "Credit card transaction currency is missing"
+
 
 def test_login_manual() -> None:
     # Get credentials from environment variables

@@ -18,8 +18,7 @@ logging.basicConfig(
     format="%(asctime)s - %(levelname)s - %(message)s",
 )
 
-
-@pytest.fixture
+@pytest.fixture(scope="session")
 def api() -> ItauAPI:
     user_id = os.environ.get("ITAU_USER_ID")
     password = os.environ.get("ITAU_PASSWORD")
@@ -27,16 +26,13 @@ def api() -> ItauAPI:
         pytest.skip("ITAU_USER_ID and ITAU_PASSWORD environment variables are required")
     api = ItauAPI(user_id, password)
     logging.info(f"Created API instance for user {user_id}")
+    api.login()  # Perform login once
     return api
 
-
 def test_login(api: ItauAPI) -> None:
-    api.login()
     assert len(api.accounts) > 0, "Login failed: No accounts found"
 
-
 def test_get_accounts(api: ItauAPI) -> None:
-    api.login()
     accounts = api.accounts
     assert len(accounts) > 0, "No accounts found"
     for account in accounts:
@@ -46,7 +42,6 @@ def test_get_accounts(api: ItauAPI) -> None:
         assert account.balance is not None, "Account balance is missing"
         assert account.currency, "Account currency is missing"
 
-
 @pytest.mark.parametrize(
     "start_date, end_date",
     [
@@ -55,7 +50,6 @@ def test_get_accounts(api: ItauAPI) -> None:
     ],
 )
 def test_get_transactions(api: ItauAPI, start_date: str, end_date: str) -> None:
-    api.login()
     account = api.accounts[0]
     transactions = api.get_transactions(account, start_date, end_date)
     assert len(transactions) > 0, f"No transactions found between {start_date} and {end_date}"
@@ -66,9 +60,7 @@ def test_get_transactions(api: ItauAPI, start_date: str, end_date: str) -> None:
         assert tx.amount is not None, "Transaction amount is missing"
         assert tx.description, "Transaction description is missing"
 
-
 def test_get_credit_card_transactions(api: ItauAPI) -> None:
-    api.login()
     credit_transactions = api.get_credit_card_transactions()
     assert len(credit_transactions) > 0, "No credit card transactions found"
     for tx in credit_transactions:
@@ -79,7 +71,6 @@ def test_get_credit_card_transactions(api: ItauAPI) -> None:
         assert tx.description, "Credit card transaction description is missing"
         assert tx.amount is not None, "Credit card transaction amount is missing"
         assert tx.currency, "Credit card transaction currency is missing"
-
 
 def test_login_manual() -> None:
     # Get credentials from environment variables

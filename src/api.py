@@ -3,8 +3,8 @@ This module provides an API client for interacting with the Itau Uruguay bank sy
 It includes functionality for logging in, retrieving account information, and fetching transactions.
 """
 
+import base64
 import json
-import logging
 import re
 from datetime import datetime
 from typing import List, Dict, Any
@@ -12,15 +12,9 @@ from urllib.parse import urlparse, parse_qs
 
 import requests
 from bs4 import BeautifulSoup
-import ua_generator
-from ua_generator.options import Options
 
-from src.utils import b64decode
-
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
-
-ERROR_CODES = {"10010": "Bad Login", "10020": "Bad Password"}
+from .models import Account, CCTransactionType, Transaction, CreditCardTransaction, TransactionType
+from .utils import generate_headers, logger, BASE_URL, ERROR_CODES
 
 
 class ItauAPI:
@@ -40,20 +34,18 @@ class ItauAPI:
 
         logger.info("Created new api for %s", user_id)
         self._id = user_id
-        self._pass = b64decode(password)
-        self.accounts: List[Dict[str, Any]] = []
+        self._pass = base64.b64decode(password).decode("ascii")
+        self.accounts: List[Account] = []
         self.credit_card_hash: str = ""
 
         # Default request values
-        self._base_url = "https://www.itaulink.com.uy/trx"
         self._session = requests.Session()
-        self._ua_options = Options(weighted_versions=True)
-        self._headers = self._generate_headers()
+        self._headers = generate_headers()
 
     def login(self) -> None:
         """
         Logins with the provided credentials
-        :raises Exception: If login fails
+        :raises ValueError: If login fails
         """
         logger.info("Logging in")
         response = self._do_login()
@@ -79,13 +71,67 @@ class ItauAPI:
         logger.error("Login failed! %s:%s", code, code_message)
         raise ValueError(f"Login failed: {code_message}")
 
-    def get_month(self, account_hash: str, month: int, year: int) -> List[Dict[str, Any]]:
+    def get_transactions(self, account: Account, start_date: str, end_date: str) -> List[Transaction]:
+        """
+        Returns transactions for a given account and date range
+        :param account: Account object
+        :param start_date: Start date in format "YYYY-MM-DD"
+        :param end_date: End date in format "YYYY-MM-DD"
+        :return: List of Transaction objects
+        """
+        start = datetime.strptime(start_date, "%Y-%m-%d")
+        end = datetime.strptime(end_date, "%Y-%m-%d")
+        transactions = []
+
+        current_date = start
+        while current_date <= end:
+            month_transactions = self.get_month(account.hash, current_date.month, current_date.year)
+
+            # Log the month transactions to debug the KeyError
+            logger.debug("Month transactions for %s/%s: %s", current_date.month, current_date.year, month_transactions)
+
+            transactions.extend(
+                [tx for tx in month_transactions if start_date <= tx.date.strftime("%Y-%m-%d") <= end_date]
+            )
+            current_date = datetime(current_date.year + (current_date.month // 12), ((current_date.month % 12) + 1), 1)
+
+        return transactions
+
+    def get_credit_card_transactions(self) -> List[CreditCardTransaction]:
+        """
+        Returns the current credit card transactions
+        :return: List of CreditCardTransaction objects
+        :raises requests.exceptions.RequestException: If there's a network error
+        """
+        logger.info("Requesting credit card transactions")
+
+        url = f"{BASE_URL}/tarjetas/credito/{self.credit_card_hash}/movimientos_actuales/00000000"
+        response = self._session.get(url, headers=self._headers)
+        response.raise_for_status()
+
+        data = response.json()["itaulink_msg"]["data"]
+        transactions = data.get("datos", {}).get("datosMovimientos", {}).get("movimientos", [])
+
+        return [
+            CreditCardTransaction(
+                date=datetime.fromtimestamp(tx["fecha"]["millis"] / 1000).date(),
+                description=tx["nombreComercio"],
+                type=CCTransactionType(tx["tipo"]),
+                amount=tx["importe"],
+                currency="Pesos" if tx["moneda"] == "Pesos" else "Dolares",
+                current_installment=tx["nroCuota"],
+                total_installments=tx["cantCuotas"],
+            )
+            for tx in transactions
+        ]
+
+    def get_month(self, account_hash: str, month: int, year: int) -> List[Transaction]:
         """
         Returns the transactions for the given month
         :param account_hash: Account hash
         :param month: Month (1-12)
         :param year: Year (four-digit format)
-        :return: List of transaction dictionaries
+        :return: List of transaction objects
         :raises ValueError: If an invalid month or year is provided, or if a future month is requested
         :raises requests.exceptions.RequestException: If there's a network error
         """
@@ -100,22 +146,17 @@ class ItauAPI:
         if year > 2000:
             year -= 2000
 
-        movement_types = {
-            "D": "expense",
-            "C": "income",
-        }
-
         try:
             movements = self._download_month(account_hash, month, year)
             return [
-                {
-                    "type": movement_types.get(movement["tipo"], "unknown"),
-                    "description": movement["descripcion"],
-                    "extraDescription": movement["descripcionAdicional"],
-                    "amount": (-movement["importe"] if movement["tipo"] == "D" else movement["importe"]),
-                    "endBalance": movement["saldo"],
-                    "date": datetime.fromtimestamp(movement["fecha"]["millis"] / 1000),
-                }
+                Transaction(
+                    date=datetime.fromtimestamp(movement["fecha"]["millis"] / 1000),
+                    type=TransactionType(movement["tipo"]),
+                    description=movement["descripcion"],
+                    extraDescription=movement["descripcionAdicional"],
+                    amount=(-movement["importe"] if movement["tipo"] == TransactionType.DEBIT else movement["importe"]),
+                    balance=movement["saldo"],
+                )
                 for movement in movements
             ]
         except requests.exceptions.RequestException as e:
@@ -140,7 +181,7 @@ class ItauAPI:
             }
         )
         response = self._session.post(
-            f"{self._base_url}/doLogin",
+            f"{BASE_URL}/doLogin",
             headers=headers,
             data={
                 "tipo_documento": 1,
@@ -160,7 +201,7 @@ class ItauAPI:
         :raises requests.exceptions.RequestException: If there's a network error
         """
         logger.info("Downloading trx")
-        response = self._session.get(self._base_url)
+        response = self._session.get(BASE_URL)
         response.raise_for_status()
 
         logger.info("Parsing trx")
@@ -187,44 +228,17 @@ class ItauAPI:
         ]:
             for account in user_data["cuentas"].get(account_type, []):
                 self.accounts.append(
-                    {
-                        "type": account["tipoCuenta"],
-                        "id": account["idCuenta"],
-                        "user": account["nombreTitular"],
-                        "currency": account["moneda"],
-                        "balance": account["saldo"],
-                        "hash": account["hash"],
-                        "customerHash": account["hashCustomer"],
-                        "customer": account["customer"],
-                    }
+                    Account(
+                        id=account["idCuenta"],
+                        hash=account["hash"],
+                        name=f"{account['tipoCuenta']} - {account['nombreTitular']}",
+                        balance=float(account["saldo"]),
+                        currency=account["moneda"],
+                    )
                 )
         logger.info("Parsed")
 
-    def _generate_headers(self) -> Dict[str, str]:
-        """
-        Generates headers using ua-generator
-        :return: Dictionary of headers
-        """
-        ua = ua_generator.generate(device="desktop", browser=("chrome", "edge", "safari"), options=self._ua_options)
-        headers: Dict[str, str] = ua.headers.get()
-        headers.update(
-            {
-                "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7",  # noqa: E501
-                "Accept-Language": "en-US,en;q=0.9",
-                "Cache-Control": "no-cache",
-                "Connection": "keep-alive",
-                "DNT": "1",
-                "Pragma": "no-cache",
-                "Sec-Fetch-Dest": "document",
-                "Sec-Fetch-Mode": "navigate",
-                "Sec-Fetch-Site": "cross-site",
-                "Sec-Fetch-User": "?1",
-                "Upgrade-Insecure-Requests": "1",
-            }
-        )
-        return headers
-
-    def _get_credit_card_hash(self) -> str | Any:
+    def _get_credit_card_hash(self) -> str:
         """
         Fetches the credit card hash from the primerTarjeta endpoint
         :return: Credit card hash string
@@ -232,7 +246,7 @@ class ItauAPI:
         :raises requests.exceptions.RequestException: If there's a network error
         """
         logger.info("Fetching credit card hash")
-        url = f"{self._base_url}/tarjetas/credito/primerTarjeta"
+        url = f"{BASE_URL}/tarjetas/credito/primerTarjeta"
         try:
             response = self._session.get(url, headers=self._headers, timeout=10)
             response.raise_for_status()
@@ -247,7 +261,7 @@ class ItauAPI:
                     value = option.get("value")
                     if value:
                         hash_part = value.split(":")[0]
-                        return hash_part
+                        return str(hash_part)
 
             raise ValueError("Failed to parse credit card hash from response")
         except requests.exceptions.RequestException as e:
@@ -257,36 +271,7 @@ class ItauAPI:
             logger.error("Unexpected error while fetching credit card hash: %s", str(e))
             raise ValueError("Failed to fetch credit card hash") from e
 
-    def get_credit_card_transactions(self) -> List[Dict[str, Any]]:
-        """
-        Returns the current credit card transactions
-        :return: List of transaction dictionaries
-        :raises requests.exceptions.RequestException: If there's a network error
-        """
-        logger.info("Requesting credit card transactions")
-
-        url = f"{self._base_url}/tarjetas/credito/{self.credit_card_hash}/" "movimientos_actuales/00000000"
-        response = self._session.get(url, headers=self._headers)
-        response.raise_for_status()
-
-        data = response.json()["itaulink_msg"]["data"]
-        transactions = data.get("datos", {}).get("datosMovimientos", {}).get("movimientos", [])
-
-        return [
-            {
-                "date": datetime.fromtimestamp(tx["fecha"]["millis"] / 1000),
-                "description": tx["nombreComercio"],
-                "extra_description": tx.get("descripcionAdicional"),
-                "amount": tx["importe"],
-                "currency": "Pesos" if tx["moneda"] == "Pesos" else "Dolares",
-                "type": tx["tipo"],
-                "installment_number": tx["nroCuota"],
-                "total_installments": tx["cantCuotas"],
-            }
-            for tx in transactions
-        ]
-
-    def _download_month(self, account_hash: str, month: int, year: int) -> List[Dict[str, Any]] | Any:
+    def _download_month(self, account_hash: str, month: int, year: int) -> List[Dict[str, Any]]:
         """
         Downloads raw movements
         :param account_hash: Account hash
@@ -301,16 +286,16 @@ class ItauAPI:
         current_year = date.year - 2000
 
         if month == current_month and year == current_year:
-            url = f"{self._base_url}/cuentas/1/{account_hash}/mesActual"
+            url = f"{BASE_URL}/cuentas/1/{account_hash}/mesActual"
             response = self._session.post(url, headers=self._headers)
             response.raise_for_status()
             data = response.json()["itaulink_msg"]["data"]
-            return data["movimientosMesActual"]["movimientos"]
+            return list[Dict[str, Any]](data["movimientosMesActual"]["movimientos"])
         elif month > current_month and year == current_year:
             raise ValueError("Future month")
         else:
-            url = f"{self._base_url}/cuentas/1/{account_hash}/{month}/{year}/consultaHistorica"
+            url = f"{BASE_URL}/cuentas/1/{account_hash}/{month}/{year}/consultaHistorica"
             response = self._session.post(url, headers=self._headers)
             response.raise_for_status()
             data = response.json()["itaulink_msg"]["data"]
-            return data["mapaHistoricos"]["movimientosHistoricos"]["movimientos"]
+            return list[Dict[str, Any]](data["mapaHistoricos"]["movimientosHistoricos"]["movimientos"])
